@@ -1,0 +1,384 @@
+---
+title: "Peloton Project"
+author: "Yu Tian"
+date: "2022-08-26"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    code_folding: hide
+    toc: yes
+    toc_float: yes
+    theme: united
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      results = 'markup',
+                      fig.width = 4,
+                      fig.height = 3,
+                      fig.align = 'center',
+                      message = F,
+                      warning = F)
+
+```
+
+
+
+# Introduction
+
+## What is Peloton?
+Peloton is a company that brings live and on-demand workout classes to its members for a monthly subscription. The company offers two physical products: an indoor cycling bike and a treadmill. Both devices have screens attached to them to access the Peloton software, allowing you to see your own metrics and compare with other members with bikes or treads. The company also offers a digital app (without metrics), where users can take classes in strength, yoga, HIIT cardio, meditation, pilates, and stretching, in addition to the cycling, running and bootcamp classes offered on the physical equipment.
+
+
+## What is the motivation of this project?
+
+
+## What is the goal of this project?
+To predict the overall rating count, which could be used to predict the popularity of one class.
+
+# Data and Package
+
+## Loading packages
+```{r}
+# packages
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+library(rsample)
+library(janitor)
+```
+
+## Data Source
+reddit
+
+## Loading Data
+
+```{r}
+data <- read_csv(file = 'Peloton Class List May 2022 - class_list.csv')
+data %>%
+  head()
+```
+## List of Variables
+
+#### dependent variable: 
+
+overall rating count: how many people have rated the class
+
+#### other variables:
+
+* content_format: video/audio
+* title: brief introduction about length and type
+* description: describe what will the class taught
+* difficulty_estimate: 
+* overall_estimate:
+* difficulty_rating_avg: the average of each individual rating a Peloton member has given a specific class after they’ve taken it
+* difficulty_rating_count: how many people have rated the class's difficulty level
+* duration (minutes): the length of exercise time in one class
+* equipment_tags: what equipment is needed for the class
+* explicit_rating: whether include explicit music during the class, 1 means yes, 0 means no
+* fitness_discipline_display_name: the type of class
+* has_closed_captions: whether the class has close the captions
+* has_pedaling_metrics: whether has metrics which show your pedaling situation and connect with the related equipment 
+* id:
+* image_url:
+* length (minutes): the total time of one class video/audio
+* location:
+* original air time: the time which the class was first published
+* overall_rating_avg:
+* muscle_group_score: the muscular parts of the body that the course exercises
+* instructor_name:
+* songs: the songs played during the class
+* artists: the artists of the songs played during the class
+* class_URL:
+
+
+
+
+# Data cleaning
+
+
+* clean names
+```{r}
+data <- data %>% 
+  clean_names()
+```
+
+* Deselect unimportant variables
+```{r}
+data <- data %>% 
+  select(-id, -image_url, -class_url)
+```
+
+* Remove the length of the class from the title so we have comparable title names. 
+(For example, “60 min Walk + Run” and “30 min Walk + Run” both become “Walk + Run”)
+```{r}
+data<- data %>% 
+  mutate(
+    # remove the length of the class from the title so we have unique title names
+    title = str_remove(title, "^.*min") %>% str_trim()
+    )
+```
+
+* check the identity of difficulty_estimate and difficulty_rating_avg, overall_estimate and overall_rating_avg
+```{r}
+identical(data$difficulty_estimate, data$difficulty_rating_avg)
+identical(data$overall_estimate, data$overall_rating_avg)
+```
+
+* Convert rating into a percent
+```{r}
+data <- data %>% 
+  mutate(
+    overall_rating_avg = overall_rating_avg*100
+  )
+```
+
+
+* remove the specific time from the date
+```{r}
+data<- data %>% 
+  mutate(
+    date = substring(original_air_time,1,10) %>% str_trim(),
+    day_time = substring(original_air_time,11,16) %>% str_trim(),
+    day_time_hour = gsub("\\:.*","",day_time))
+data
+```
+
+
+* add days and year column
+```{r}
+end_date <- "31/05/2022"
+data <- data %>%
+  mutate(
+    days = as.numeric(as.Date(as.character(end_date), format="%d/%m/%Y") - as.Date(as.character(original_air_time), format="%d/%m/%Y")),
+    year = as.numeric(format(as.Date(original_air_time, format="%d/%m/%Y"),"%Y")))
+
+```
+
+* Change equipment column into multiple logical variables by type.
+```{r}
+#create a new variable for TRUE or FALSE when specific equipment is detected from a list
+data$equip_yoga_block <- str_detect(data$equipment_tags, "Yoga Block")
+data$equip_yoga_blanket <- str_detect(data$equipment_tags, "Yoga Blanket")
+data$equip_yoga_mat <- str_detect(data$equipment_tags, "Yoga Mat")
+data$equip_yoga_strap <- str_detect(data$equipment_tags, "Yoga Strap")
+
+
+data$equip_strength_weights_light <- str_detect(data$equipment_tags, "Light Weights")
+data$equip_strength_weights_medium <- str_detect(data$equipment_tags, "Medium Weights")
+data$equip_strength_weights_heavy <- str_detect(data$equipment_tags, "Heavy Weights")
+data$equip_strength_resistanceband <- str_detect(data$equipment_tags, "Resistance Band")
+
+data$equip_workout_mat <- str_detect(data$equipment_tags, "Workout Mat")
+
+data %>%
+  head()
+```
+
+
+prediction? difficulty_estimate and difficulty_rating_avg -> both use??
+
+delete original_air_time??? 
+
+day_time?? no zero?? only use hour?? day_time_hour??
+
+delete unimportant variable for prediction?? reorder variables???
+
+delete euqipment_tags?? NA to false???
+
+first song??
+
+
+# Exploratory Data Analysis
+
+## class
+I hypothesize that certain fitness disciplines (type) will result in different overall rating count. Let’s begin by counting how many classes are contained within each fitness discipline (type).
+
+```{r}
+ggplot(data, aes(fitness_discipline_display_name)) +
+  geom_bar() +
+  labs(
+    title = "Count of Peloton Classes",
+    x = "Class Type",
+    y = "Count"
+  ) +
+  coord_flip()
+
+```
+Peloton started as a company selling only internet-connected stationary bikes in 2015, and so it makes sense that the platform would have more cycling classes than any other types. However, they’ve clearly added different types of classes over the years. 
+
+Let’s examine the work they have been doing:
+
+```{r}
+data %>% 
+  group_by(year, fitness_discipline_display_name) %>% 
+  count() %>% 
+  ggplot(aes(fitness_discipline_display_name, n, fill = fitness_discipline_display_name)) +
+  geom_col(show.legend = FALSE) + 
+  facet_wrap(~year, scales = "free_y") +
+  coord_flip() +
+  labs(
+    title = "New Class Types from Each Year",
+    y = "Number of Classes"
+  )
+```
+
+except cycling 
+
+yoga, strength, running
+
+count higher? more popular?
+
+## overall rating count
+In the end, we want to predict overall rating count in our model. Let’s see the distribution.
+```{r}
+summary(data$overall_rating_count)
+```
+
+```{r}
+ggplot(data, aes(overall_rating_count)) +
+  geom_histogram() +
+  labs(title = "density of rating count")
+```
+
+```{r}
+data2 <- subset(data, overall_rating_count<50000)
+ggplot(data2, aes(overall_rating_count)) +
+  geom_histogram() +
+  labs(title = "density of rating count")
+```
+```{r}
+ggplot(data, aes(overall_rating_count)) +
+  geom_histogram(bins = 30, color = "white") +
+  facet_wrap(~fitness_discipline_display_name, scales = "free_y") +
+  labs(
+    title = "Histogram of Rating Count by fitness discpline"
+  )
+```
+
+```{r}
+ggplot(data2, aes(overall_rating_count)) +
+  geom_histogram(bins = 30, color = "white") +
+  facet_wrap(~fitness_discipline_display_name, scales = "free_y") +
+  labs(
+    title = "Histogram of Rating Count by fitness discpline"
+  )
+```
+
+```{r}
+ggplot(data, aes(reorder(fitness_discipline_display_name, overall_rating_count), overall_rating_count)) +
+  geom_boxplot(varwidth = TRUE) + 
+  coord_flip() +
+  labs(
+    title = "Overall Rating Count by Type",
+    x = "Class Type"
+  )
+```
+```{r}
+ggplot(data2, aes(reorder(fitness_discipline_display_name, overall_rating_count), overall_rating_count)) +
+  geom_boxplot(varwidth = TRUE) + 
+  coord_flip() +
+  labs(
+    title = "Overall Rating Count by Type",
+    x = "Class Type"
+  )
+```
+
+```{r}
+data3 <- aggregate(data$overall_rating_count, by=list(Category=data$fitness_discipline_display_name), FUN=sum)
+
+
+ggplot(data3,aes(x,Category)) +
+  geom_point()
+```
+
+
+```{r}
+data %>% 
+  ggplot(aes(duration_minutes, overall_rating_count)) +
+  geom_point(alpha = 0.1) +
+  stat_summary(fun.y=mean, colour="red", geom="line", size = 3)+
+  facet_wrap(~fitness_discipline_display_name, scales = "free") +
+  labs(
+    title = "Class Duration vs. Rating count by Type"
+  )
+```
+```{r}
+data2 %>% 
+  ggplot(aes(difficulty_rating_avg, overall_rating_count)) +
+  # want to see overplotting
+  geom_point(alpha = 0.1) +
+  geom_smooth(se = FALSE, color = "red", size = 3) +
+  facet_wrap(~fitness_discipline_display_name, scales = "free_y") +
+  labs(
+    title = "Class Difficulty vs. Rating, by Type"
+  )
+```
+
+## instructor 
+
+## music
+
+##  
+
+# Data split
+* transform the logical variable into factor
+```{r}
+data  <- data  %>%
+  mutate(
+  equip_yoga_block = factor(equip_yoga_block),
+  equip_yoga_blanket = factor(equip_yoga_blanket),
+  equip_yoga_mat = factor(equip_yoga_mat),
+  equip_yoga_strap = factor(equip_yoga_strap),
+  equip_strength_weights_light = factor(equip_strength_weights_light),
+  equip_strength_weights_medium = factor(equip_strength_weights_medium),
+  equip_strength_weights_heavy = factor(equip_strength_weights_heavy),
+  equip_strength_resistanceband = factor(equip_strength_resistanceband),
+  equip_workout_mat = factor(equip_workout_mat),
+  has_closed_captions = factor(has_closed_captions),
+  has_pedaling_metrics = factor(has_pedaling_metrics)
+)
+
+```
+
+
+The data was split in a 80% training, 20% testing split.
+
+```{r}
+data_split <- data %>% 
+  initial_split(prop = 0.8, strata = "overall_rating_count")
+
+data_train <- training(data_split)
+dim(data_train)
+data_test <- testing(data_split)
+dim(data_test)
+```
+
+
+
+# Model Building 
+
+* linear regression
+```{r}
+data_lm = lm(overall_rating_count ~ content_format + difficulty_estimate + overall_estimate + difficulty_rating_avg+ difficulty_rating_count + duration_minutes + explicit_rating + fitness_discipline_display_name + has_closed_captions + has_pedaling_metrics + length_minutes + location + overall_rating_avg + instructor_name + date + day_time_hour + year, data = data_train)
+
+summary(data_lm)
+
+```
+#### ???? +  equip_yoga_block + equip_yoga_blanket + equip_yoga_mat + equip_yoga_strap + equip_strength_weights_light + equip_strength_weights_medium + equip_strength_weights_heavy + equip_strength_resistanceband + equip_workout_mat
+
+ Error in `contrasts<-`(`*tmp*`, value = contr.funs[1 + isOF[nn]]) : 
+  contrasts can be applied only to factors with 2 or more levels
+
+```{r}
+# lm_prediction <- predict(data_lm, newdata = data_test)
+```
+
+
+# Conclusion
+
+
+
+
